@@ -404,11 +404,11 @@ class Data(object):
         # Changed to ignore '#' after a data.parameters[x]=y line
         number_of_parameters=0
         for line in open(self.param,'r'):
-          if(line):
-            if(line.find("#") != -1):
-              line = line.split("#")[0]
+            if(line):
+                if(line.find("#") != -1):
+                    line = line.split("#")[0]
             if(line.find('data.parameters[') != -1):
-              number_of_parameters+=1
+                number_of_parameters+=1
         if number_of_parameters != len(self.parameters):
             raise io_mp.ConfigurationError(
                 "You probably have two lines in your parameter files with "

@@ -320,6 +320,27 @@ def chain(cosmo, data, command_line):
                 f.write('\n')
             print('Results of minimizer saved to: \n', fname)
 
+
+            # DC: HERE!
+            # From alexreevesy's github
+            ###Alex Reeves edit### Add in functionlity to save a scaled bestfit file 
+            fname_bf = os.path.join(command_line.folder, 'minimizer.bestfit')
+            
+            with open(fname_bf, 'w') as f:
+                f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
+                for idx in xrange(len(labels)):
+                    bf_value = minimum[idx]*data.mcmc_parameters[labels[idx]]['scale']
+                    if bf_value > 0:
+                        f.write(' %.6e\t' % bf_value)
+                    else:
+                        f.write('%.6e\t' % bf_value)
+                f.write('\n')  
+
+            print('Results of minimizer saved to: \n', fname_bf)
+
+        if command_line.profile_param:
+            profilelkl, dummy = sampler.profile_likelihood(cosmo, data, command_line, C)
+
         # if we want to compute Fisher matrix and then stop
         if command_line.fisher:
             sampler.get_fisher_matrix(cosmo, data, command_line, C, minimum)

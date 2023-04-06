@@ -766,6 +766,9 @@ def create_parser():
     # -- adaptive ts argument (OPTIONAL)
     runparser.add_argument('--adaptive-ts', help=helpdict['adaptive-ts'], type=int,
                            dest='adaptive_ts', default=1000)
+    # DC: HERE!
+    runparser.add_argument('--profile', type=str,
+                           dest='profile_param')
 
     # -- jumping factor (OPTIONAL)
     runparser.add_argument('-f', help=helpdict['f'], type=float,

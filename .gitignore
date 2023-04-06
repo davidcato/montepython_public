@@ -38,3 +38,9 @@ data/JLA/
 # Ignore the coverage reports
 .coverage
 htmlcov/
+
+data/full_shape_spectra
+
+plot_files/*
+montepython/likelihoods/full_shape_spectra
+

@@ -28,6 +28,9 @@ from io_mp import dictitems,dictvalues,dictkeys
 import os
 import scipy.linalg as la
 import scipy.optimize as op
+# DC: HERE!
+import pybobyqa
+import dfols
 
 def run(cosmo, data, command_line):
     """
@@ -375,15 +378,20 @@ def get_minimum(cosmo, data, command_line, covmat):
     parameters = np.zeros(len(parameter_names), 'float64')
     bounds = np.zeros([len(parameter_names),2], 'float64')
     cons = ()
+    # DC: HERE!
+    # Do you believe in your first guess? 
+    # I do believe! (numbers_std = 1, montepython default)
+    # My first guess isn't that good (numbers_std = 3)
+    numbers_std = 4.
     for index, elem in enumerate(parameter_names):
         parameters[index] = center[elem]
         stepsizes[index] = 0.1*covmat[index,index]**0.5
         if data.mcmc_parameters[elem]['initial'][1] == None:
-            bounds[index,0] = center[elem] - 1.*covmat[index,index]**0.5
+            bounds[index,0] = center[elem] - numbers_std*covmat[index,index]**0.5
         else:
             bounds[index,0] = data.mcmc_parameters[elem]['initial'][1]
         if data.mcmc_parameters[elem]['initial'][2] == None:
-            bounds[index,1] = center[elem] + 1.*covmat[index,index]**0.5
+            bounds[index,1] = center[elem] + numbers_std*covmat[index,index]**0.5
         else:
             bounds[index,1] = data.mcmc_parameters[elem]['initial'][2]
         cons += ({'type': 'ineq', 'fun': lambda x: x[index] - bounds[index,0]},
@@ -394,6 +402,10 @@ def get_minimum(cosmo, data, command_line, covmat):
     print('parameters: ',[param for param in parameters])
     print('stepsizes: ',stepsizes[0])
     print('bounds: ',bounds)
+    # DC: HERE!
+    # pybobyqa take as an arguments the bounds in the form of (lower_i,upper_i)
+    lower = bounds[:,0]
+    upper = bounds[:,1]
 
     #minimum, chi2 = op.fmin_cg(chi2_eff,
     # Use unconstrained Polak & Ribiere conjugate gradient algorithm
@@ -416,6 +428,8 @@ def get_minimum(cosmo, data, command_line, covmat):
     #                            epsilon = stepsizes,
     #                            disp = 5)
 
+    # DC: HERE!
+    # Commenting the default minimizer
     #result = op.minimize(chi2_eff,
     #                     parameters,
     #                     args = (cosmo,data),
@@ -430,32 +444,555 @@ def get_minimum(cosmo, data, command_line, covmat):
 
     # For HST with 1 param the best is TNC with 'eps':stepsizes, bounds, tol, although bounds make it smlower (but avoids htting unphysical region)
     # For forecasts or Planck lite SLSQP with tol=0.00001 works well, but does not work for full Planck TTTEEE highl
-    result = op.minimize(chi2_eff,
-                         parameters,
-                         args = (cosmo,data),
+    # result = op.minimize(chi2_eff,
+                         # parameters,
+                         # args = (cosmo,data),
                          #method='trust-region-exact',
                          #method='BFGS',
                          #method='TNC',
                          #method='L-BFGS-B',
-                         method='SLSQP',
+                         # method='SLSQP',
                          #options={'eps':stepsizes},
                          #constraints=cons,
-                         bounds=bounds,
-                         tol=command_line.minimize_tol)
+                         # bounds=bounds,
+                         # tol=command_line.minimize_tol)
                          #options = {'disp': True})
                                     #'initial_tr_radius': stepsizes,
                                     #'max_tr_radius': stepsizes})
+
+    # Commenting the deafult minimizer from montepython
+    delta_chi2_per = 100.
+    ix0 = 0
+
+    # while delta_chi2 > 1e-2 or ix0 < 10:
+
+    #     result = pybobyqa.solve(chi2_eff,
+    #                          parameters,
+    #                          args = (cosmo,data),
+    #                          bounds=(lower,upper),
+    #                          scaling_within_bounds=True,
+    #                          # rhobeg=0.15,
+    #                          seek_global_minimum=True,
+    #                          print_progress=True,
+    #                          maxfun=100*(ix0+1))
+        
+    #     delta_chi2 = chi2_eff(parameters, cosmo, data) - result.f
+    #     print('delta_chi2: %s'%delta_chi2)
+    #     ix0+=1
+
+    #     print(result)
+
+    #     parameters = result.x
+
+    #     if delta_chi2 > 0:
+    #         r_x = result.x
+    #         r_f = result.f
+
+    randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=2*len(parameters))
+    randoms_chi2 = []
+    for rx0 in randoms_x0:
+        print(rx0)
+        randoms_chi2.append(chi2_eff(rx0, cosmo, data))
+
+    tinka = np.argmin(randoms_chi2)
+    x0 = randoms_x0[tinka]
+    delta_chi2_ini = chi2_eff(parameters, cosmo, data)-chi2_eff(x0, cosmo, data)
+
+    if delta_chi2_ini>0:
+        print("You were lucky! I found a better initial guess")
+        print("Decreasing Chi2 by: %.2f"%delta_chi2_ini)
+        parameters = x0
+
+    while delta_chi2_per > 0.02:
+
+        if ix0!=0:
+            randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=2*len(parameters))
+            randoms_chi2 = []
+            for rx0 in randoms_x0:
+                print(rx0)
+                randoms_chi2.append(chi2_eff(rx0, cosmo, data))
+
+            tinka = np.argmin(randoms_chi2)
+            x0 = randoms_x0[tinka]
+            delta_chi2_ini = chi2_eff(parameters, cosmo, data)-chi2_eff(x0, cosmo, data)
+
+            if delta_chi2_ini>0:
+                print("You were lucky! I found a better initial guess")
+                print("Decreasing Chi2 by: %.2f"%delta_chi2_ini)
+                parameters = x0
+
+        npt = min(len(parameters)**2,6*len(parameters))
+        maxfun = min(1000,400*(ix0+1))
+
+        print("Number of evaluations used to interpolation: %i"%npt)
+        print("Max number of evaluations: %i"%maxfun)
+
+        result = dfols.solve(chi_eff_vector,
+                             parameters,
+                             args=(cosmo,data),
+                             bounds=(lower,upper),
+                             scaling_within_bounds=True,
+                             rhobeg=0.15,
+                             print_progress=True,
+                             npt=npt,
+                             maxfun=maxfun)
+        
+        chi2_eff_prev = chi2_eff(parameters, cosmo, data)
+        delta_chi2 = (chi2_eff_prev - result.f)
+        delta_chi2_per = 100.*(1. - result.f/chi2_eff_prev)
+        print('delta_chi2: %s'%delta_chi2)
+        print('delta_chi2_per: %s'%delta_chi2_per)
+
+        ix0+=1
+
+        print(result)
+
+        if delta_chi2 > 0:
+            parameters = result.x
+            r_x = result.x
+            r_f = result.f
+            labels = data.get_mcmc_parameters(['varying'])
+            fname_minimizer = os.path.join(command_line.folder, 'partial_minimizer_%i.bestfit'%(ix0-1))
+            print("Partial progress saved to: %s"%fname_minimizer)
+            print("New starting point: %s"%parameters)
+
+            with open(fname_minimizer, 'w') as f:
+                f.write('# real minimized \chi^2 = {:} \n'.format(chi2_eff(r_x, cosmo, data)))    
+                f.write('# approx. minimized \chi^2 = {:} \n'.format(r_f))    
+                f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
+                for idx in range(len(labels)):
+                    bf_value = r_x[idx]*data.mcmc_parameters[labels[idx]]['scale']
+                    if bf_value > 0:
+                        f.write(' %.6e\t' % bf_value)
+                    else:
+                        f.write('%.6e\t' % bf_value)
+                f.write('\n')  
+
+        else:
+            break 
+
+        if delta_chi2 < 0.1:
+            numbers_std = 3
+
+        for index, elem in enumerate(parameter_names):
+            stepsizes[index] = 0.1*covmat[index,index]**0.5
+            if data.mcmc_parameters[elem]['initial'][1] == None:
+                bounds[index,0] = parameters[index] - numbers_std*covmat[index,index]**0.5
+            else:
+                bounds[index,0] = data.mcmc_parameters[elem]['initial'][1]
+            if data.mcmc_parameters[elem]['initial'][2] == None:
+                bounds[index,1] = parameters[index] + numbers_std*covmat[index,index]**0.5
+            else:
+                bounds[index,1] = data.mcmc_parameters[elem]['initial'][2]
+            cons += ({'type': 'ineq', 'fun': lambda x: x[index] - bounds[index,0]},
+                     {'type': 'ineq', 'fun': lambda x: bounds[index,1] - x[index]},)
+            print('bounds on ',elem,' : ',bounds[index,0],bounds[index,1])
+
+        if ix0>10:
+            break
+        if delta_chi2_per<0.02:
+            break
+
 
     #result = op.differential_evolution(chi2_eff,
     #                                   bounds,
     #                                   args = (cosmo,data))
 
+
+    # DC: HERE!
+    # Adding salt and pepper to the standard output
     print('Final output of minimize')
+    # print('chi2 minimun: %.4f'%result.f)
+    print('chi2 minimun: %.4f'%r_f)
+    # print('-loglkl minimun: %.4f'%(0.5*result.f))
+    print('-loglkl minimun: %.4f'%(0.5*r_f))
     for index,elem in enumerate(parameter_names):
         print(elem, 'new:', result.x[index], ', old:', parameters[index])
 
     #FK: return also min chi^2:
-    return result.x, result.fun
+    # DC: HERE!
+    # commenting the result of op.minimize
+    #return result.x, result.fun
+    # Using pybobyqa formt
+    return result.x, result.f
+
+def profile_likelihood(cosmo, data, command_line, covmat):
+
+    # Create the center dictionary, which will hold the center point
+    # information
+    center = {}
+    parameter_names = data.get_mcmc_parameters(['varying'])
+    profile_param = command_line.profile_param
+
+    if not command_line.bf:
+        for elem in parameter_names:
+            center[elem] = data.mcmc_parameters[elem]['initial'][0]
+    else:
+        read_args_from_bestfit(data, command_line.bf)
+        for elem in parameter_names:
+            center[elem] = data.mcmc_parameters[elem]['last_accepted']
+
+    stepsizes = np.zeros(len(parameter_names), 'float64')
+    parameters = np.zeros(len(parameter_names), 'float64')
+    bounds = np.zeros([len(parameter_names),2], 'float64')
+    cons = ()
+    # DC: HERE!
+    # Do you believe in your first guess? 
+    # I do believe! (numbers_std = 1, montepython default)
+    # My first guess isn't that good (numbers_std = 3)
+    numbers_std = 4.
+
+    for index, elem in enumerate(parameter_names):
+        parameters[index] = center[elem]
+        stepsizes[index] = 0.1*covmat[index,index]**0.5
+        if data.mcmc_parameters[elem]['initial'][1] == None:
+            bounds[index,0] = center[elem] - numbers_std*covmat[index,index]**0.5
+        else:
+            bounds[index,0] = data.mcmc_parameters[elem]['initial'][1]
+        if data.mcmc_parameters[elem]['initial'][2] == None:
+            bounds[index,1] = center[elem] + numbers_std*covmat[index,index]**0.5
+        else:
+            bounds[index,1] = data.mcmc_parameters[elem]['initial'][2]
+        cons += ({'type': 'ineq', 'fun': lambda x: x[index] - bounds[index,0]},
+                 {'type': 'ineq', 'fun': lambda x: bounds[index,1] - x[index]},)
+        print('bounds on ',elem,' : ',bounds[index,0],bounds[index,1])
+
+    center_profile = data.mcmc_parameters[profile_param]['initial'][0]
+    bounds_profile = np.zeros(2, 'float64')
+    if data.mcmc_parameters[profile_param]['initial'][1] != None:
+        bounds_profile[0] = data.mcmc_parameters[profile_param]['initial'][1]
+    if data.mcmc_parameters[profile_param]['initial'][2] != None:
+        bounds_profile[1] = data.mcmc_parameters[profile_param]['initial'][2]
+
+    #FK: use list-comprehension so that the parameter values are distinguishable from step to step
+    print('parameters: ',[param for param in parameters])
+    print('stepsizes: ',stepsizes[0])
+    print('bounds: ',bounds)
+    print('bounds profile: ',[bop for bop in bounds_profile])
+    # DC: HERE!
+    # pybobyqa take as an arguments the bounds in the form of (lower_i,upper_i)
+    lower = bounds[:,0]
+    upper = bounds[:,1]
+
+    nprofile = 16
+    profile_param_values = np.linspace(bounds_profile[0],bounds_profile[1],nprofile)
+    profile_param_values = np.append(center_profile,profile_param_values)
+    fname_profile_grid = os.path.join(command_line.folder, 'profile_%s.grid'%(profile_param))
+    np.savetxt(fname_profile_grid,profile_param_values,fmt='%.6e')
+    fname_profile = os.path.join(command_line.folder, 'profile_%s.txt'%(profile_param))
+
+    # check for MPI
+    try:
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        num_procs = comm.Get_size()
+        # suppress duplicate output from slaves
+        if rank:
+            command_line.quiet = True
+        use_mpi = True
+    except ImportError:
+        # set all chains to master if no MPI
+        rank = 0
+        use_mpi = False
+
+    with open(fname_profile, 'w') as f:
+        f.write('#chi^2_r\t chi^2_a\t'+profile_param)    
+        f.write('\n')
+
+    npt = min(len(parameters)**2,6*len(parameters))
+
+    def chi2_eff_(p,c,d):
+        chi2 = np.sum(chi_eff_vector(p,c,d)**2.)
+        return chi2
+
+    profile_param_val = center_profile
+
+    if use_mpi:
+        print('Fast your belt, we will be running in parallel!')
+        print('Minimizing over',[param for param in parameter_names])
+        for ip in range(rank,len(profile_param_values),num_procs):
+            del profile_param_val
+            delta_chi2 = 1e4
+            delta_chi2_per = 1e4
+            # data.cosmo_arguments.update({profile_param:profile_param_val})
+            profile_param_val = profile_param_values[ip]
+            data.profile_param = profile_param
+            data.profile_param_val = profile_param_val
+            print('Rank: %i, value %.4g'%(rank,profile_param_val))
+
+            # Commenting the deafult minimizer from montepython
+
+            ix0 = 0
+            ntinka = 2*len(parameters)-ix0//2
+
+            print("Random uniform sampling, drawing %i points"%ntinka)
+            randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=ntinka)
+            randoms_chi2 = []
+            for rx0 in randoms_x0:
+                print(rx0)
+                randoms_chi2.append(chi2_eff_(rx0, cosmo, data))
+
+            tinka = np.argmin(randoms_chi2)
+            x0 = randoms_x0[tinka]
+            delta_chi2_ini = chi2_eff_(parameters, cosmo, data) - chi2_eff_(x0, cosmo, data)
+
+            if delta_chi2_ini > 0:
+                print("You were lucky! I found a better initial guess")
+                print("Decreasing Chi2 by: %.2f"%delta_chi2_ini)
+                parameters = x0
+
+            while delta_chi2_per > 0.02 and delta_chi2 > 0.1:
+                maxfun = min(1000,400*(ix0+1))
+
+                if ix0!=0:
+                    randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=ntinka)
+                    randoms_chi2 = []
+                    for rx0 in randoms_x0:
+                        print(rx0)
+                        randoms_chi2.append(chi2_eff_(rx0, cosmo, data))
+
+                    tinka = np.argmin(randoms_chi2)
+                    x0 = randoms_x0[tinka]
+                    delta_chi2_ini = chi2_eff_(parameters, cosmo, data)-chi2_eff_(x0, cosmo, data)
+
+                    if delta_chi2_ini>0:
+                        print("You were lucky! I found a better initial guess")
+                        print("Decreasing Chi2 by: %.2f"%delta_chi2_ini)
+                        parameters = x0
+
+                print("Number of evaluations used to interpolation: %i"%npt)
+                print("Max number of evaluations: %i"%maxfun)
+
+                result = dfols.solve(chi_eff_vector,
+                                     parameters,
+                                     args=(cosmo,data),
+                                     bounds=(lower,upper),
+                                     scaling_within_bounds=True,
+                                     rhobeg=0.15,
+                                     print_progress=False,
+                                     npt=npt,
+                                     maxfun=maxfun)
+                
+                chi2_eff_prev = chi2_eff_(parameters, cosmo, data)
+                delta_chi2 = (chi2_eff_prev - result.f)
+                delta_chi2_per = 100.*(1. - result.f/chi2_eff_prev)
+                print('delta_chi2: %s'%delta_chi2)
+                print('delta_chi2_per: %s'%delta_chi2_per)
+
+                ix0+=1
+
+                print(result)
+
+                if delta_chi2 > 0:
+                    parameters = result.x
+                    r_x = result.x
+                    r_f = result.f
+                    labels = data.get_mcmc_parameters(['varying'])
+                    fname_minimizer = os.path.join(command_line.folder, 'minimizer_%s_%.4g.bestfit'%(profile_param,profile_param_val))
+                    print("Partial progress saved to: %s"%fname_minimizer)
+                    print("New starting point: %s"%parameters)
+
+                    if ix0 == 0:
+                        with open(fname_minimizer, 'w') as f:
+                            f.write('# real minimized \chi^2 = {:} \n'.format(chi2_eff_(r_x, cosmo, data)))    
+                            f.write('# approx. minimized \chi^2 = {:} \n'.format(r_f))    
+                            f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
+                            for idx in range(len(labels)):
+                                bf_value = r_x[idx]*data.mcmc_parameters[labels[idx]]['scale']
+                                if bf_value > 0:
+                                    f.write(' %.6e\t' % bf_value)
+                                else:
+                                    f.write('%.6e\t' % bf_value)
+                            f.write('\n')
+                    else:
+                        with open(fname_minimizer, 'a') as f:
+                            f.write('# real minimized \chi^2 = {:} \n'.format(chi2_eff_(r_x, cosmo, data)))    
+                            f.write('# approx. minimized \chi^2 = {:} \n'.format(r_f))    
+                            f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
+                            for idx in range(len(labels)):
+                                bf_value = r_x[idx]*data.mcmc_parameters[labels[idx]]['scale']
+                                if bf_value > 0:
+                                    f.write(' %.6e\t' % bf_value)
+                                else:
+                                    f.write('%.6e\t' % bf_value)
+                            f.write('\n')
+
+                else:
+                    print('delta_chi2 is negative!') 
+
+                if delta_chi2 < 0.1:
+                    numbers_std = 3
+
+                for index, elem in enumerate(parameter_names):
+                    stepsizes[index] = 0.1*covmat[index,index]**0.5
+                    if data.mcmc_parameters[elem]['initial'][1] == None:
+                        bounds[index,0] = parameters[index] - numbers_std*covmat[index,index]**0.5
+                    else:
+                        bounds[index,0] = data.mcmc_parameters[elem]['initial'][1]
+                    if data.mcmc_parameters[elem]['initial'][2] == None:
+                        bounds[index,1] = parameters[index] + numbers_std*covmat[index,index]**0.5
+                    else:
+                        bounds[index,1] = data.mcmc_parameters[elem]['initial'][2]
+                    cons += ({'type': 'ineq', 'fun': lambda x: x[index] - bounds[index,0]},
+                             {'type': 'ineq', 'fun': lambda x: bounds[index,1] - x[index]},)
+                    print('bounds on ',elem,' : ',bounds[index,0],bounds[index,1])
+
+                if ix0>15:
+                    break
+                if delta_chi2_per<0.02 and delta_chi2 < 0.1:
+                    break
+
+            print('Im done with %.4g (Rank: %i)'%(profile_param_val,rank))
+            print('Saving progress to: '+fname_profile)
+
+            with open(fname_profile, 'a') as f:
+                f.write('%.6e\t %.6e\t %.6e'%(chi2_eff_(r_x, cosmo, data),r_f,profile_param_val))
+                f.write('\n')
+
+    else:
+        print('Not mpi!')
+        for profile_param_val in profile_param_values:
+            # data.cosmo_arguments.update({profile_param:profile_param_val})
+            data.profile_param = profile_param
+            data.profile_param_val = profile_param_val
+            print(chi2_eff_(parameters, cosmo, data))
+
+            # Commenting the deafult minimizer from montepython
+            ix0 = 0
+
+            randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=ntinka)
+            randoms_chi2 = []
+            for rx0 in randoms_x0:
+                print(rx0)
+                randoms_chi2.append(chi2_eff_(rx0, cosmo, data))
+
+            tinka = np.argmin(randoms_chi2)
+            x0 = randoms_x0[tinka]
+            delta_chi2_ini = chi2_eff_(parameters, cosmo, data)-chi2_eff_(x0, cosmo, data)
+
+            if delta_chi2_ini>0:
+                print("You were lucky! I found a better initial guess")
+                print("Decreasing Chi2 by: %.2f"%delta_chi2_ini)
+                parameters = x0
+
+            while delta_chi2_per > 0.02 and delta_chi2 > 0.1:
+                maxfun = min(1000,400*(ix0+1))
+
+                if ix0!=0:
+                    randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=ntinka)
+                    randoms_chi2 = []
+                    for rx0 in randoms_x0:
+                        print(rx0)
+                        randoms_chi2.append(chi2_eff_(rx0, cosmo, data))
+
+                    tinka = np.argmin(randoms_chi2)
+                    x0 = randoms_x0[tinka]
+                    delta_chi2_ini = chi2_eff_(parameters, cosmo, data)-chi2_eff_(x0, cosmo, data)
+
+                    if delta_chi2_ini>0:
+                        print("You were lucky! I found a better initial guess")
+                        print("Decreasing Chi2 by: %.2f"%delta_chi2_ini)
+                        parameters = x0
+
+                print("Number of evaluations used to interpolation: %i"%npt)
+                print("Max number of evaluations: %i"%maxfun)
+
+                result = dfols.solve(chi_eff_vector,
+                                     parameters,
+                                     args=(cosmo,data),
+                                     bounds=(lower,upper),
+                                     scaling_within_bounds=True,
+                                     rhobeg=0.15,
+                                     print_progress=False,
+                                     npt=npt,
+                                     maxfun=maxfun)
+                
+                chi2_eff_prev = chi2_eff_(parameters, cosmo, data)
+                delta_chi2 = (chi2_eff_prev - result.f)
+                delta_chi2_per = 100.*(1. - result.f/chi2_eff_prev)
+                print('delta_chi2: %s'%delta_chi2)
+                print('delta_chi2_per: %s'%delta_chi2_per)
+
+                ix0+=1
+
+                print(result)
+
+                if delta_chi2 > 0:
+                    parameters = result.x
+                    r_x = result.x
+                    r_f = result.f
+                    labels = data.get_mcmc_parameters(['varying'])
+                    fname_minimizer = os.path.join(command_line.folder, 'minimizer_%s_%.4g.bestfit'%(profile_param,profile_param_val))
+                    print("Partial progress saved to: %s"%fname_minimizer)
+                    print("New starting point: %s"%parameters)
+
+                    if ix0 == 0:
+                        with open(fname_minimizer, 'w') as f:
+                            f.write('# real minimized \chi^2 = {:} \n'.format(chi2_eff_(r_x, cosmo, data)))    
+                            f.write('# approx. minimized \chi^2 = {:} \n'.format(r_f))    
+                            f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
+                            for idx in range(len(labels)):
+                                bf_value = r_x[idx]*data.mcmc_parameters[labels[idx]]['scale']
+                                if bf_value > 0:
+                                    f.write(' %.6e\t' % bf_value)
+                                else:
+                                    f.write('%.6e\t' % bf_value)
+                            f.write('\n')
+                    else:
+                        with open(fname_minimizer, 'a') as f:
+                            f.write('# real minimized \chi^2 = {:} \n'.format(chi2_eff_(r_x, cosmo, data)))    
+                            f.write('# approx. minimized \chi^2 = {:} \n'.format(r_f))    
+                            f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
+                            for idx in range(len(labels)):
+                                bf_value = r_x[idx]*data.mcmc_parameters[labels[idx]]['scale']
+                                if bf_value > 0:
+                                    f.write(' %.6e\t' % bf_value)
+                                else:
+                                    f.write('%.6e\t' % bf_value)
+                            f.write('\n')
+
+                else:
+                    print('delta_chi2 is negative!') 
+
+                if delta_chi2_per<0.02 and delta_chi2 < 0.1:
+                    numbers_std = 3
+
+                for index, elem in enumerate(parameter_names):
+                    stepsizes[index] = 0.1*covmat[index,index]**0.5
+                    if data.mcmc_parameters[elem]['initial'][1] == None:
+                        bounds[index,0] = parameters[index] - numbers_std*covmat[index,index]**0.5
+                    else:
+                        bounds[index,0] = data.mcmc_parameters[elem]['initial'][1]
+                    if data.mcmc_parameters[elem]['initial'][2] == None:
+                        bounds[index,1] = parameters[index] + numbers_std*covmat[index,index]**0.5
+                    else:
+                        bounds[index,1] = data.mcmc_parameters[elem]['initial'][2]
+                    cons += ({'type': 'ineq', 'fun': lambda x: x[index] - bounds[index,0]},
+                             {'type': 'ineq', 'fun': lambda x: bounds[index,1] - x[index]},)
+                    print('bounds on ',elem,' : ',bounds[index,0],bounds[index,1])
+
+                if ix0>12:
+                    break
+                if delta_chi2_per<0.02:
+                    break
+
+            with open(fname_profile, 'a') as f:
+                f.write('%.6e\t  %.6e\t  %.6e\n'%(chi2_eff_(r_x, cosmo, data),r_f,profile_param_val))
+                f.write('\n')
+
+            # DC: HERE!
+            # Adding salt and pepper to the standard output
+            print('Profiling for %s = %.4g'%(profile_param,profile_param_val))
+            print('Final output of minimize')
+            # print('chi2 minimun: %.4f'%result.f)
+            print('chi2 minimun: %.4f'%r_f)
+            # print('-loglkl minimun: %.4f'%(0.5*result.f))
+            print('-loglkl minimun: %.4f'%(0.5*r_f))
+            for index,elem in enumerate(parameter_names):
+                print(elem, 'new:', result.x[index], ', old:', parameters[index])
+
+    return result.x, result.f
 
 def chi2_eff(params, cosmo, data, bounds=False):
     parameter_names = data.get_mcmc_parameters(['varying'])
@@ -476,6 +1013,26 @@ def chi2_eff(params, cosmo, data, bounds=False):
     print('In minimization: ',chi2,' at ',[param for param in params])
 
     return chi2
+
+def chi_eff_vector(params, cosmo, data, bounds=False):
+    parameter_names = data.get_mcmc_parameters(['varying'])
+    for index, elem in enumerate(parameter_names):
+        #print(elem,params[index])
+        data.mcmc_parameters[elem]['current'] = params[index]
+        if not type(bounds) == type(False):
+            if (params[index] < bounds[index,0]) or (params[index] > bounds[index,1]):
+                chi2 = 1e30
+                print(elem+' exceeds bounds with value %f and bounds %f < x < %f' %(params[index],bounds[index,0],bounds[index,1]))
+                return chi2
+    # Update current parameters to the new parameters, only taking steps as requested
+    data.update_cosmo_arguments()
+    # Compute loglike value for the new parameters
+    chi = np.sqrt(-2.*compute_lkl_vector(cosmo, data))
+
+    #FK: use list-comprehension so that the parameter values are distinguishable from step to step
+    # print('In minimization: ',chi**2.,' at ',[param for param in params])
+
+    return chi
 
 def gradient_chi2_eff(params, cosmo, data, bounds=False):
     parameter_names = data.get_mcmc_parameters(['varying'])
@@ -708,7 +1265,6 @@ def compute_lkl(cosmo, data):
 
         # Prepare the cosmological module with the new set of parameters
         cosmo.set(data.cosmo_arguments)
-
         # Compute the model, keeping track of the errors
 
         # In classy.pyx, we made use of two type of python errors, to handle
@@ -836,6 +1392,179 @@ def compute_lkl(cosmo, data):
                 "you may now start a new run.")
 
     return loglike/data.command_line.temperature
+
+def compute_lkl_vector(cosmo, data):
+    """
+    Compute the likelihood, given the current point in parameter space.
+
+    This function now performs a test before calling the cosmological model
+    (**new in version 1.2**). If any cosmological parameter changed, the flag
+    :code:`data.need_cosmo_update` will be set to :code:`True`, from the
+    routine :func:`check_for_slow_step <data.Data.check_for_slow_step>`.
+
+    Returns
+    -------
+    loglike : float
+        The log of the likelihood (:math:`\\frac{-\chi^2}2`) computed from the
+        sum of the likelihoods of the experiments specified in the input
+        parameter file.
+
+        This function returns :attr:`data.boundary_loglike
+        <data.data.boundary_loglike>`, defined in the module :mod:`data` if
+        *i)* the current point in the parameter space has hit a prior edge, or
+        *ii)* the cosmological module failed to compute the model. This value
+        is chosen to be extremly small (large negative value), so that the step
+        will always be rejected.
+
+
+    """
+    from classy import CosmoSevereError, CosmoComputationError
+
+    # If the cosmological module has already been called once, and if the
+    # cosmological parameters have changed, then clean up, and compute.
+    if cosmo.state and data.need_cosmo_update is True:
+        cosmo.struct_cleanup()
+
+    # If the data needs to change, then do a normal call to the cosmological
+    # compute function. Note that, even if need_cosmo update is True, this
+    # function must be called if the jumping factor is set to zero. Indeed,
+    # this means the code is called for only one point, to set the fiducial
+    # model.
+    if ((data.need_cosmo_update) or
+            (not cosmo.state) or
+            (data.jumping_factor == 0)):
+
+        # Prepare the cosmological module with the new set of parameters
+        if data.profile_param:
+            data.cosmo_arguments[data.profile_param] = data.profile_param_val
+
+        cosmo.set(data.cosmo_arguments)
+
+        # Compute the model, keeping track of the errors
+
+        # In classy.pyx, we made use of two type of python errors, to handle
+        # two different situations.
+        # - CosmoSevereError is returned if a parameter was not properly set
+        # during the initialisation (for instance, you entered Ommega_cdm
+        # instead of Omega_cdm).  Then, the code exits, to prevent running with
+        # imaginary parameters. This behaviour is also used in case you want to
+        # kill the process.
+        # - CosmoComputationError is returned if Class fails to compute the
+        # output given the parameter values. This will be considered as a valid
+        # point, but with minimum likelihood, so will be rejected, resulting in
+        # the choice of a new point.
+        try:
+            data.cosmo_arguments['output']
+        except:
+            data.cosmo_arguments.update({'output': ''})
+        if 'SZ' in data.cosmo_arguments['output']:
+            try:
+                if 'SZ_counts':
+                    cosmo.compute(["szcount"])
+                else:
+                    cosmo.compute(["szpowerspectrum"])
+            except CosmoComputationError as failure_message:
+                sys.stderr.write(str(failure_message)+'\n')
+                sys.stderr.flush()
+                return data.boundary_loglike
+            except CosmoSevereError as critical_message:
+                raise io_mp.CosmologicalModuleError(
+                    "Something went wrong when calling CLASS" +
+                    str(critical_message))
+            except KeyboardInterrupt:
+                raise io_mp.CosmologicalModuleError(
+                    "You interrupted execution")
+        else:
+            try:
+                cosmo.compute()
+            except CosmoComputationError as failure_message:
+                # could be useful to uncomment for debugging:
+                #np.set_printoptions(precision=30, linewidth=150)
+                #print('cosmo params')
+                #print(data.cosmo_arguments)
+                #print(data.cosmo_arguments['tau_reio'])
+                sys.stderr.write(str(failure_message)+'\n')
+                sys.stderr.flush()
+                return data.boundary_loglike
+            except CosmoSevereError as critical_message:
+                raise io_mp.CosmologicalModuleError(
+                    "Something went wrong when calling CLASS" +
+                    str(critical_message))
+            except KeyboardInterrupt:
+                raise io_mp.CosmologicalModuleError(
+                    "You interrupted execution")
+
+    # For each desired likelihood, compute its value against the theoretical
+    # model
+    loglike = []
+    # This flag holds the information whether a fiducial model was written. In
+    # this case, the log likelihood returned will be '1j', meaning the
+    # imaginary number i.
+    flag_wrote_fiducial = 0
+
+    for likelihood in dictvalues(data.lkl):
+        if likelihood.need_update is True:
+            value = likelihood.loglkl(cosmo, data)
+            # Storing the result
+            likelihood.backup_value = value
+        # Otherwise, take the existing value
+        else:
+            value = likelihood.backup_value
+        if data.command_line.display_each_chi2:
+            print("-> for ",likelihood.name,":  loglkl=",value,",  chi2eff=",-2.*value)
+        loglike.append(value)
+        # In case the fiducial file was written, store this information
+        if value == 1j:
+            flag_wrote_fiducial += 1
+
+    # Compute the derived parameters if relevant
+    if data.get_mcmc_parameters(['derived']) != []:
+        try:
+            derived = cosmo.get_current_derived_parameters(
+                data.get_mcmc_parameters(['derived']))
+            for name, value in dictitems(derived):
+                data.mcmc_parameters[name]['current'] = value
+        except AttributeError:
+            # This happens if the classy wrapper is still using the old
+            # convention, expecting data as the input parameter
+            cosmo.get_current_derived_parameters(data)
+        except CosmoSevereError:
+            raise io_mp.CosmologicalModuleError(
+                "Could not write the current derived parameters")
+
+    # DCH adding a check to make sure the derived_lkl are passed properly
+    if data.get_mcmc_parameters(['derived_lkl']) != []:
+        try:
+            for (name, value) in data.derived_lkl.items():
+                data.mcmc_parameters[name]['current'] = value
+        except Exception as missing:
+            raise io_mp.CosmologicalModuleError(
+                "You requested derived_lkl parameters, but you are missing the following ones in your param file:" + str(missing))
+
+    for elem in data.get_mcmc_parameters(['derived']):
+        data.mcmc_parameters[elem]['current'] /= \
+            data.mcmc_parameters[elem]['scale']
+
+    # If fiducial files were created, inform the user, and exit
+    if flag_wrote_fiducial > 0:
+        if flag_wrote_fiducial == len(data.lkl):
+            raise io_mp.FiducialModelWritten(
+                "This is not an error but a normal abort, because " +
+                "fiducial file(s) was(were) created. " +
+                "You may now start a new run. ")
+        else:
+            raise io_mp.FiducialModelWritten(
+                "This is not an error but a normal abort, because " +
+                "fiducial file(s) was(were) created. " +
+                "However, be careful !!! Some previously non-existing " +
+                "fiducial files were created, but potentially not all of them. " +
+                "Some older fiducial files will keep being used. If you have doubts, " +
+                "you are advised to check manually in the headers of the " +
+                "corresponding files that all fiducial parameters are consistent "+
+                "with each other. If everything looks fine, "
+                "you may now start a new run.")
+
+    return np.array(loglike)/data.command_line.temperature
 
 
 def compute_fisher(data, command_line, cosmo, center, step_size, step_matrix):
