@@ -339,7 +339,7 @@ def chain(cosmo, data, command_line):
             print('Results of minimizer saved to: \n', fname_bf)
 
         if command_line.profile_param:
-            profilelkl, dummy = sampler.profile_likelihood(cosmo, data, command_line, C)
+            sampler.profile_likelihood(cosmo, data, command_line, C)
 
         # if we want to compute Fisher matrix and then stop
         if command_line.fisher:
