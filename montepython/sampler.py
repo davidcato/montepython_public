@@ -766,7 +766,8 @@ def profile_likelihood(cosmo, data, command_line, covmat):
                 read_args_from_bestfit(data, fname_minimizer_last)
                 for index, elem in enumerate(parameter_names):
                     parameters[index] = data.mcmc_parameters[elem]['last_accepted']
-                print(parameters)
+                    # print(parameters[index])
+                # print('parameters: ',[param for param in parameters])
                 prev = True
             except:
                 print("No previous results found")
