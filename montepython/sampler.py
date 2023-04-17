@@ -755,6 +755,21 @@ def profile_likelihood(cosmo, data, command_line, covmat):
             profile_param_val = profile_param_values[ip]
             data.profile_param = profile_param
             data.profile_param_val = profile_param_val
+            fname_minimizer = os.path.join(command_line.folder, 'minimizer_%s_%.4g.bestfit'%(profile_param,profile_param_val))
+            prev = False
+
+            try:
+                np.loadtxt(fname_minimizer)
+                print("Previous results found")
+                fname_minimizer_last = os.path.join(command_line.folder, 'last_%s_%.4g.bestfit'%(profile_param,profile_param_val))
+                os.system("tail -2 "+fname_minimizer+" > "+fname_minimizer_last)
+                read_args_from_bestfit(data, fname_minimizer_last)
+                for index, elem in enumerate(parameter_names):
+                    parameters[index] = data.mcmc_parameters[elem]['last_accepted']
+                print(parameters)
+                prev = True
+            except:
+                print("No previous results found")
 
             if profile_param_val != 12321:
                 print('Rank: %i, value %.4g'%(rank,profile_param_val))
@@ -824,22 +839,34 @@ def profile_likelihood(cosmo, data, command_line, covmat):
                         r_x = result.x
                         r_f = result.f
                         labels = data.get_mcmc_parameters(['varying'])
-                        fname_minimizer = os.path.join(command_line.folder, 'minimizer_%s_%.4g.bestfit'%(profile_param,profile_param_val))
                         print("Partial progress saved to: %s"%fname_minimizer)
                         print("New starting point: %s"%parameters)
 
-                        if ix0 == 0:
-                            with open(fname_minimizer, 'w') as f:
-                                f.write('# real minimized \chi^2 = {:} \n'.format(chi2_eff_(r_x, cosmo, data)))    
-                                f.write('# approx. minimized \chi^2 = {:} \n'.format(r_f))    
-                                f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
-                                for idx in range(len(labels)):
-                                    bf_value = r_x[idx]*data.mcmc_parameters[labels[idx]]['scale']
-                                    if bf_value > 0:
-                                        f.write(' %.6e\t' % bf_value)
-                                    else:
-                                        f.write('%.6e\t' % bf_value)
-                                f.write('\n')
+                        if not prev:
+                            if ix0 == 0:
+                                with open(fname_minimizer, 'w') as f:
+                                    f.write('# real minimized \chi^2 = {:} \n'.format(chi2_eff_(r_x, cosmo, data)))    
+                                    f.write('# approx. minimized \chi^2 = {:} \n'.format(r_f))    
+                                    f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
+                                    for idx in range(len(labels)):
+                                        bf_value = r_x[idx]*data.mcmc_parameters[labels[idx]]['scale']
+                                        if bf_value > 0:
+                                            f.write(' %.6e\t' % bf_value)
+                                        else:
+                                            f.write('%.6e\t' % bf_value)
+                                    f.write('\n')
+                            else:
+                                with open(fname_minimizer, 'a') as f:
+                                    f.write('# real minimized \chi^2 = {:} \n'.format(chi2_eff_(r_x, cosmo, data)))    
+                                    f.write('# approx. minimized \chi^2 = {:} \n'.format(r_f))    
+                                    f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
+                                    for idx in range(len(labels)):
+                                        bf_value = r_x[idx]*data.mcmc_parameters[labels[idx]]['scale']
+                                        if bf_value > 0:
+                                            f.write(' %.6e\t' % bf_value)
+                                        else:
+                                            f.write('%.6e\t' % bf_value)
+                                    f.write('\n')
                         else:
                             with open(fname_minimizer, 'a') as f:
                                 f.write('# real minimized \chi^2 = {:} \n'.format(chi2_eff_(r_x, cosmo, data)))    
