@@ -470,8 +470,26 @@ def get_minimum(cosmo, data, command_line, covmat):
                                     #'max_tr_radius': stepsizes})
 
     # Commenting the deafult minimizer from montepython
+    data.profile_param = False
     delta_chi2_per = 100.
+    delta_chi2 = 100.
     ix0 = 0
+    delta_chi2_per_tol = 1e-3
+    delta_chi2_tol = 1e-2
+
+    npt = min(len(parameters)**2,3*len(parameters)-6)
+    ntinka = 2*len(parameters) 
+
+    # fname_partial_minimizer_zero = os.path.join(command_line.folder, 'partial_minimizer_0.bestfit')
+    fname_partial_minimizer = []
+    listdir = os.listdir(command_line.folder)
+    for dirs in listdir:
+        if 'partial' in dirs:
+            fname_partial_minimizer.append(dirs)
+
+    for part in fname_partial_minimizer:
+        cmd = "mv "+os.path.join(command_line.folder,part)+" "+os.path.join(command_line.folder,"prev_"+part)
+        os.system(cmd)
 
     # while delta_chi2 > 1e-2 or ix0 < 10:
 
@@ -497,7 +515,7 @@ def get_minimum(cosmo, data, command_line, covmat):
     #         r_x = result.x
     #         r_f = result.f
 
-    randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=2*len(parameters))
+    randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=ntinka)
     randoms_chi2 = []
     for rx0 in randoms_x0:
         print(rx0)
@@ -512,7 +530,7 @@ def get_minimum(cosmo, data, command_line, covmat):
         print("Decreasing Chi2 by: %.2f"%delta_chi2_ini)
         parameters = x0
 
-    while delta_chi2_per > 0.02:
+    while delta_chi2_per > delta_chi2_per_tol and delta_chi2 > delta_chi2_tol:
 
         if ix0!=0:
             randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=2*len(parameters))
@@ -530,8 +548,7 @@ def get_minimum(cosmo, data, command_line, covmat):
                 print("Decreasing Chi2 by: %.2f"%delta_chi2_ini)
                 parameters = x0
 
-        npt = min(len(parameters)**2,6*len(parameters))
-        maxfun = min(1000,400*(ix0+1))
+        maxfun = 1250
 
         print("Number of evaluations used to interpolation: %i"%npt)
         print("Max number of evaluations: %i"%maxfun)
@@ -541,7 +558,8 @@ def get_minimum(cosmo, data, command_line, covmat):
                              args=(cosmo,data),
                              bounds=(lower,upper),
                              scaling_within_bounds=True,
-                             rhobeg=0.15,
+                             rhobeg=0.2,
+                             rhoend=1e-9,
                              print_progress=True,
                              npt=npt,
                              maxfun=maxfun)
@@ -651,10 +669,7 @@ def profile_likelihood(cosmo, data, command_line, covmat):
     bounds = np.zeros([len(parameter_names),2], 'float64')
     cons = ()
     # DC: HERE!
-    # Do you believe in your first guess? 
-    # I do believe! (numbers_std = 1, montepython default)
-    # My first guess isn't that good (numbers_std = 3)
-    numbers_std = 4.
+    numbers_std = 4
 
     for index, elem in enumerate(parameter_names):
         parameters[index] = center[elem]
@@ -713,7 +728,7 @@ def profile_likelihood(cosmo, data, command_line, covmat):
         f.write('#chi^2_r\t chi^2_a\t'+profile_param)    
         f.write('\n')
 
-    npt = min(len(parameters)**2,4*len(parameters))
+    npt = min(len(parameters)**2,3*len(parameters)-6)
     ntinka = 2*len(parameters)    
 
     def chi2_eff_(p,c,d):
@@ -721,8 +736,8 @@ def profile_likelihood(cosmo, data, command_line, covmat):
         return chi2
 
     profile_param_val = center_profile
-    delta_chi2_per_tol = 5e-3
-    delta_chi2_tol = 5e-2
+    delta_chi2_per_tol = 1e-3
+    delta_chi2_tol = 1e-2
     ix0_max = 12
 
     if use_mpi:
@@ -756,7 +771,6 @@ def profile_likelihood(cosmo, data, command_line, covmat):
             data.profile_param = profile_param
             data.profile_param_val = profile_param_val
             fname_minimizer = os.path.join(command_line.folder, 'minimizer_%s_%.4g.bestfit'%(profile_param,profile_param_val))
-            prev = False
 
             try:
                 np.loadtxt(fname_minimizer)
@@ -768,25 +782,31 @@ def profile_likelihood(cosmo, data, command_line, covmat):
                     parameters[index] = data.mcmc_parameters[elem]['last_accepted']
                     # print(parameters[index])
                 # print('parameters: ',[param for param in parameters])
+                data.verbose = True
+                chi2_eff_prev = chi2_eff_(parameters, cosmo, data)
+                print('Previous chi2:  %.2f'%chi2_eff_prev)
                 prev = True
             except:
                 print("No previous results found")
 
+            prev = False
+            data.verbose = False
             if profile_param_val != 12321:
                 print('Rank: %i, value %.4g'%(rank,profile_param_val))
 
                 ix0 = 0
+                negcount = 0
+                chi2_eff_prev = chi2_eff_(parameters, cosmo, data)
 
                 print("Random uniform sampling, drawing %i points"%ntinka)
                 randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=ntinka)
                 randoms_chi2 = []
                 for rx0 in randoms_x0:
-                    print(rx0)
                     randoms_chi2.append(chi2_eff_(rx0, cosmo, data))
 
                 tinka = np.argmin(randoms_chi2)
                 x0 = randoms_x0[tinka]
-                delta_chi2_ini = chi2_eff_(parameters, cosmo, data) - chi2_eff_(x0, cosmo, data)
+                delta_chi2_ini = chi2_eff_prev - chi2_eff_(x0, cosmo, data)
 
                 if delta_chi2_ini > 0:
                     print("You were lucky! I found a better initial guess")
@@ -794,7 +814,8 @@ def profile_likelihood(cosmo, data, command_line, covmat):
                     parameters = x0
 
                 while delta_chi2_per > delta_chi2_per_tol and delta_chi2 > delta_chi2_tol:
-                    maxfun = min(1000,450*(ix0+1))
+                    maxfun = 1250
+                    chi2_eff_prev = chi2_eff_(parameters, cosmo, data)
 
                     if ix0!=0:
                         randoms_x0 = np.random.multivariate_normal(parameters,covmat,size=ntinka)
@@ -805,7 +826,7 @@ def profile_likelihood(cosmo, data, command_line, covmat):
 
                         tinka = np.argmin(randoms_chi2)
                         x0 = randoms_x0[tinka]
-                        delta_chi2_ini = chi2_eff_(parameters, cosmo, data)-chi2_eff_(x0, cosmo, data)
+                        delta_chi2_ini = chi2_eff_prev-chi2_eff_(x0, cosmo, data)
 
                         if delta_chi2_ini>0:
                             print("You were lucky! I found a better initial guess")
@@ -820,12 +841,12 @@ def profile_likelihood(cosmo, data, command_line, covmat):
                                          args=(cosmo,data),
                                          bounds=(lower,upper),
                                          scaling_within_bounds=True,
-                                         rhobeg=0.15,
+                                         rhobeg=0.2,
+                                         rhoend=1e-9,
                                          print_progress=False,
                                          npt=npt,
                                          maxfun=maxfun)
                     
-                    chi2_eff_prev = chi2_eff_(parameters, cosmo, data)
                     delta_chi2 = (chi2_eff_prev - result.f)
                     delta_chi2_per = 100.*(1. - result.f/chi2_eff_prev)
                     print('delta_chi2: %s'%delta_chi2)
@@ -880,42 +901,66 @@ def profile_likelihood(cosmo, data, command_line, covmat):
                                     else:
                                         f.write('%.6e\t' % bf_value)
                                 f.write('\n')
-
                     else:
+                        negcount += 1
+                        ranamp = 5e-5
                         print('delta_chi2 is negative!') 
-
-                    if delta_chi2 < delta_chi2_tol:
-                        numbers_std = 3
-
-                    for index, elem in enumerate(parameter_names):
-                        stepsizes[index] = 0.1*covmat[index,index]**0.5
-                        if data.mcmc_parameters[elem]['initial'][1] == None:
-                            bounds[index,0] = parameters[index] - numbers_std*covmat[index,index]**0.5
+                        if negcount < 3:
+                            print('Small kick!')
+                            kick = 2.*ranamp*np.random.random_sample(len(parameters)) + ranamp
+                            parameters = parameters + kick*parameters
                         else:
-                            bounds[index,0] = data.mcmc_parameters[elem]['initial'][1]
-                        if data.mcmc_parameters[elem]['initial'][2] == None:
-                            bounds[index,1] = parameters[index] + numbers_std*covmat[index,index]**0.5
-                        else:
-                            bounds[index,1] = data.mcmc_parameters[elem]['initial'][2]
-                        cons += ({'type': 'ineq', 'fun': lambda x: x[index] - bounds[index,0]},
-                                 {'type': 'ineq', 'fun': lambda x: bounds[index,1] - x[index]},)
-                        print('bounds on ',elem,' : ',bounds[index,0],bounds[index,1])
+                            r_x = parameters
+                            r_f = chi2_eff_prev
 
-                    if ix0>ix0_max:
-                        parameters = result.x
+                    # if delta_chi2 < delta_chi2_tol:
+                    #     numbers_std = 3
+
+                    # for index, elem in enumerate(parameter_names):
+                    #     stepsizes[index] = 0.1*covmat[index,index]**0.5
+                    #     if data.mcmc_parameters[elem]['initial'][1] == None:
+                    #         bounds[index,0] = parameters[index] - numbers_std*covmat[index,index]**0.5
+                    #     else:
+                    #         bounds[index,0] = data.mcmc_parameters[elem]['initial'][1]
+                    #     if data.mcmc_parameters[elem]['initial'][2] == None:
+                    #         bounds[index,1] = parameters[index] + numbers_std*covmat[index,index]**0.5
+                    #     else:
+                    #         bounds[index,1] = data.mcmc_parameters[elem]['initial'][2]
+                    #     cons += ({'type': 'ineq', 'fun': lambda x: x[index] - bounds[index,0]},
+                    #              {'type': 'ineq', 'fun': lambda x: bounds[index,1] - x[index]},)
+                    #     print('bounds on ',elem,' : ',bounds[index,0],bounds[index,1])
+
+                    if negcount > 2:
+                        print('Kick counter: %i'%negcount)
                         break
-                    if delta_chi2_per<delta_chi2_per_tol and delta_chi2 < delta_chi2_tol:
-                        parameters = result.x
-                        break
+                    if delta_chi2 > 0:
+                        if ix0>ix0_max:
+                            parameters = result.x
+                            break
+                        if delta_chi2_per<delta_chi2_per_tol and delta_chi2 < delta_chi2_tol:
+                            parameters = result.x
+                            break
 
-                print('Im done with %.4g (Rank: %i)'%(profile_param_val,rank))
-                print('Evaluation: %i'%ix0)
-                print('Final delta_chi2_per: %.4g, delta_chi2: %.4g'%(delta_chi2_per,delta_chi2))
-                print('Saving progress to: '+fname_profile)
 
-                with open(fname_profile, 'a') as f:
-                    f.write('%.6e\t %.6e\t %.6e'%(chi2_eff_(r_x, cosmo, data),r_f,profile_param_val))
-                    f.write('\n')
+                if delta_chi2 > 0:
+                    print('Im done with %.4g (Rank: %i)'%(profile_param_val,rank))
+                    print('Evaluation: %i'%ix0)
+                    print('Final delta_chi2_per: %.4g, delta_chi2: %.4g'%(delta_chi2_per,delta_chi2))
+                    print('Saving progress to: '+fname_profile)
+                    print(22*"*")
+                    with open(fname_profile, 'a') as f:
+                        f.write('%.6e\t %.6e\t %.6e'%(chi2_eff_(r_x, cosmo, data),r_f,profile_param_val))
+                        f.write('\n')
+                else:
+                    print('Negative delta_chi2. Profile value %.4g (Rank: %i)'%(profile_param_val,rank))    
+                    print('Evaluation: %i'%ix0)
+                    print('Final delta_chi2_per: %.4g, delta_chi2: %.4g'%(delta_chi2_per,delta_chi2))
+                    print('Previous point chi2: %.6e, r_x: %s'%(chi2_eff_(r_x, cosmo, data),r_x))
+                    print('Saving progress to: '+fname_profile)
+                    print(22*"*")
+                    with open(fname_profile, 'a') as f:
+                        f.write('%.6e\t %.6e\t %.6e'%(chi2_eff_(r_x, cosmo, data),-r_f,profile_param_val))
+                        f.write('\n')
 
     else:
         print('Not mpi!')
@@ -1396,7 +1441,10 @@ def compute_lkl(cosmo, data):
 
     for likelihood in dictvalues(data.lkl):
         if likelihood.need_update is True:
-            value = likelihood.loglkl(cosmo, data)
+            try:
+                value = likelihood.loglkl(cosmo, data)
+            except:
+                value = data.boundary_loglike
             # Storing the result
             likelihood.backup_value = value
         # Otherwise, take the existing value
@@ -1504,7 +1552,8 @@ def compute_lkl_vector(cosmo, data):
         # Prepare the cosmological module with the new set of parameters
         if data.profile_param:
             data.cosmo_arguments[data.profile_param] = data.profile_param_val
-
+            if data.verbose:
+                print("Using %s: %.6f"%(data.profile_param,data.cosmo_arguments[data.profile_param]))
         cosmo.set(data.cosmo_arguments)
 
         # Compute the model, keeping track of the errors
@@ -1571,7 +1620,10 @@ def compute_lkl_vector(cosmo, data):
 
     for likelihood in dictvalues(data.lkl):
         if likelihood.need_update is True:
-            value = likelihood.loglkl(cosmo, data)
+            try:
+                value = likelihood.loglkl(cosmo, data)
+            except:
+                value = data.boundary_loglike
             # Storing the result
             likelihood.backup_value = value
         # Otherwise, take the existing value

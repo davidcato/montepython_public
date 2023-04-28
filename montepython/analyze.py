@@ -2075,7 +2075,8 @@ class Information(object):
         'Green':['#88B27A','#297C09'],
         'Orange':['#F3BE82','#ED920F'],
         'Grey':['#ABABAB','#737373'],
-        'Purple':['#B87294','#88004C']
+        'Purple':['#B87294','#88004C'],
+        'Brown':['#DBCAB8','#B89672']
     }
     # order used when several directories are analysed
     MP_color_cycle = [
@@ -2084,10 +2085,11 @@ class Information(object):
         MP_color['Green'],
         MP_color['Orange'],
         MP_color['Grey'],
-        MP_color['Purple']
+        MP_color['Purple'],
+        MP_color['Brown']
     ]
     # in the same order, list of transparency levels
-    alphas = [0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
+    alphas = [0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
 
     def __init__(self, command_line, other=None):
         """

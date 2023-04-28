@@ -320,13 +320,13 @@ def chain(cosmo, data, command_line):
                 f.write('\n')
             print('Results of minimizer saved to: \n', fname)
 
-
             # DC: HERE!
             # From alexreevesy's github
             ###Alex Reeves edit### Add in functionlity to save a scaled bestfit file 
             fname_bf = os.path.join(command_line.folder, 'minimizer.bestfit')
             
             with open(fname_bf, 'w') as f:
+                f.write('# minimized \chi^2 = {:} \n'.format(min_chi2))
                 f.write('# %s\n' % ', '.join(['%16s' % label for label in labels]))
                 for idx in xrange(len(labels)):
                     bf_value = minimum[idx]*data.mcmc_parameters[labels[idx]]['scale']
